@@ -1,0 +1,10 @@
+data/
+dataset/
+large_datasets/
+heterophlic_data/
+hdatasets/
+
+*.csv
+*.sh
+*.png
+*.jpg
