@@ -13,7 +13,6 @@ import networkx as nx
 import torch_geometric
 from scatter_letters import sl
 
-#Hello ji
 import seaborn as sns
 from sklearn.manifold import TSNE
 
