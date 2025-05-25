@@ -4,13 +4,16 @@ from copy import deepcopy
 from tqdm import tqdm
 from sklearn.metrics import f1_score
 from torch_sparse import sum as sparsesum, mul, SparseTensor
-from torch_geometric.data import HeteroData
+from torch_geometric.data import HeteroData, Data
 
 def ToHetero(data_orig, datamid, data_coarse, C, nodetype_y, type_map, type_mapinv, nclasses, target_node, coar_method, ifFGC_LAGC=False):
     device = C.device
-    one_hot = F.one_hot(nodetype_y.to(torch.int64), len(set((nodetype_y.tolist())))).to(device)
+    C = F.normalize(C, p=1.0, dim=1)
+    one_hot = F.one_hot(nodetype_y.to(torch.int64), len(data_orig.node_types)).to(device)
+    # one_hot[~datamid.train_mask] = torch.tensor([0 for _ in range(one_hot.shape[1])], dtype=one_hot.dtype)
     counts = C.T @ one_hot.to(torch.float)
     coarse_ny = torch.argmax(counts, dim=1).squeeze() #Super nodes type
+    
 
     newY = F.one_hot(datamid.y).to(torch.float).to(device)
     newY[~datamid.train_mask] = torch.tensor([0 for _ in range(newY.shape[1])], dtype=newY.dtype, device=newY.device)
@@ -20,12 +23,8 @@ def ToHetero(data_orig, datamid, data_coarse, C, nodetype_y, type_map, type_mapi
     # Check which rows are all zeros
     zero_rows_mask = (temp_temp == 0).all(dim=1)
 
-    
-    # print(zero_rows_mask[coarse_ny['author']].count_nonzero(), 'hello')
-    # print(data_coarse.train_mask[zero_rows_mask.nonzero(as_tuple=True)[0].to('cpu')].count_nonzero(), data_coarse.train_mask.count_nonzero())
+    # Handle empty super nodes (if any)
     data_coarse.train_mask[zero_rows_mask] = False
-
-
 
     nodetype_idx = {k: [] for k in type_map.keys()}
 
@@ -54,7 +53,7 @@ def ToHetero(data_orig, datamid, data_coarse, C, nodetype_y, type_map, type_mapi
     for node_type in data_orig.metadata()[0]:
         tempX = torch.zeros(nodetype_idx[type_mapinv[node_type]].shape[0], X.shape[1])
         for index in nodetype_idx[type_mapinv[node_type]]:
-            tempX[new_indices[index.item()][1]-curr] = X[index.item()]
+            tempX[new_indices[index.item()][1]-curr] = X[index.item()] 
         newData[node_type].x = tempX
         curr += tempX.shape[0]
     
@@ -69,20 +68,9 @@ def ToHetero(data_orig, datamid, data_coarse, C, nodetype_y, type_map, type_mapi
     for index in nodetype_idx[type_mapinv[target_node]]:
         tempMask[new_indices[index.item()][1]] = data_coarse.train_mask[index.item()].item()
     
-    newData[target_node].train_mask = tempMask
+    newData[target_node].train_mask = tempMask         
 
-
-    # for node_type in data_orig.metadata()[0]:
-    #     if hasattr(data_orig[node_type], 'x'):
-    #         newData[node_type].x = data_coarse.x[nodetype_idx[type_mapinv[node_type]]]
-    #     if hasattr(data_orig[node_type], 'y'):
-    #         newData[node_type].y = data_coarse.y[nodetype_idx[type_mapinv[node_type]]]
-    #     if hasattr(data_orig[node_type], 'train_mask'):
-    #         newData[node_type].train_mask = data_coarse.train_mask[nodetype_idx[type_mapinv[node_type]]]
-    #         newData[node_type].train_mask[(newData[node_type].y >= len(type_mapinv)).nonzero(as_tuple=True)[0]] = False
-            
-
-    ei = data_coarse.edge_index.to('cpu')
+    ei = data_coarse.edge_index
 
     new_edges_dict = {(edge_type[0], edge_type[2]): [] for edge_type in data_orig.metadata()[1]}
     for i, j in ei.T.tolist():
@@ -93,7 +81,64 @@ def ToHetero(data_orig, datamid, data_coarse, C, nodetype_y, type_map, type_mapi
     for edge_type in data_orig.metadata()[1]:
         newData[edge_type].edge_index = torch.tensor(new_edges_dict[(edge_type[0], edge_type[2])], dtype=data_orig[edge_type].edge_index.dtype).T
 
+    newIndices = {}
+    curr = 0
+    for node_type in data_orig.node_types:
+        newIndices[node_type] = curr
+        curr += newData[node_type].x.shape[0]
+
+
+    for edge_type in data_orig.edge_types:
+        if newData[edge_type].edge_index.shape[0]>0:
+            src, dst = edge_type[0], edge_type[2]
+            idx = torch.ones(newData[edge_type].edge_index.shape[1], 2) * torch.tensor([newIndices[src], newIndices[dst]])
+            newData[edge_type].edge_index = (newData[edge_type].edge_index.T - idx).T.to(newData[edge_type].edge_index.dtype)
+    
+    for node_type in data_orig.node_types:
+            newData[node_type].x = newData[node_type].x[:, :data_orig[node_type].x.shape[1]]
+            
     return newData
+
+def ToHomo(dataset):
+    total_nodes = sum([dataset[node_type].x.shape[0] for node_type in dataset.node_types])
+
+    max_feat_size = max([dataset[node_type].x.shape[1] for node_type in dataset.node_types])
+    X = torch.zeros(total_nodes, max_feat_size)
+    curr = 0
+    prev = 0
+    for node_type in dataset.node_types:
+        curr += dataset[node_type].x.shape[0]
+        X[prev:curr, :dataset[node_type].x.shape[1]] = dataset[node_type].x
+        prev += dataset[node_type].x.shape[0]
+
+    y_list = [dataset[dataset.target_node].y] + [(i-1+dataset.num_classes)*torch.ones(dataset[node_type].x.shape[0]) for i, node_type in enumerate(dataset.node_types) if node_type != dataset.target_node]
+    y = torch.cat(y_list, dim=0).to(torch.int64)
+
+    
+    curr = 0
+    new_indices = {}
+    for node_type in dataset.node_types:
+        new_indices[node_type] = curr
+        curr += dataset[node_type].x.shape[0]
+
+
+    edge_list = []
+    for edge_type in dataset.edge_types:
+        src, dst = edge_type[0], edge_type[2]
+        idx = torch.ones(dataset[edge_type].edge_index.shape[1], 2) * torch.tensor([new_indices[src], new_indices[dst]])
+        myedge = dataset[edge_type].edge_index.T + idx
+        edge_list.append(myedge)
+    final_edge_list = torch.cat(edge_list).to(torch.int64)
+
+    
+    maskEx = torch.ones(total_nodes-dataset[dataset.target_node].x.shape[0], dtype=torch.bool)
+    ntrain_mask = torch.cat((dataset[dataset.target_node].train_mask, maskEx))
+    ntest_mask = torch.cat((dataset[dataset.target_node].test_mask, maskEx))
+    nval_mask = torch.cat((dataset[dataset.target_node].val_mask, maskEx))
+
+    newDataset = Data(x=X, y=y, edge_index=final_edge_list.T, train_mask = ntrain_mask, test_mask = ntest_mask, val_mask = nval_mask)
+
+    return newDataset
 
 
 def asymmetric_gcn_norm(adj_t):

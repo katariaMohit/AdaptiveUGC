@@ -86,8 +86,9 @@ from sklearn.metrics.pairwise import euclidean_distances
 
 ##Imports for heterogenous datasets
 from heterogenous_utils.hmain import run_imdb, run_dblp, run_acm
+from heterogenous_utils.hmain2 import run_hetero
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 # device = torch.device("cpu")
 
 class MyDataset(Dataset):
@@ -688,37 +689,10 @@ if __name__ == "__main__":
         print(dataset[0])
 
 ####################################### HETEROGENEOUS DATASETS#########################
-    elif args.dataset == 'imdb':
-        if args.hetero_r == 1:
-            run_imdb('base', args.hetero_r, 'hdatasets/IMDB', args.nevals, args.hgnn)
-
-        elif args.start_coarsen_method == 'cugc' or args.start_coarsen_method == 'caugc':
-            run_imdb(args.start_coarsen_method, args.hetero_r, 'hdatasets/IMDB', args.nevals, args.hgnn)
-
-        elif args.start_coarsen_method in ['variation_neighborhoods', 'variation_edges', 'variation_cliques', 'heavy_edge', 'algebraic_JC', 'affinity_GS', 'kron', 'fugc', 'faugc', 'fgc', 'lagc']:
-            mydataset = run_imdb(args.start_coarsen_method, args.hetero_r, 'hdatasets/IMDB', args.nevals, args.hgnn)
-
+    elif args.dataset in ['imdb', 'hdblp', 'acm']:
+        run_hetero(args.dataset, args.start_coarsen_method, args.hetero_r, args.hgnn, args.nevals, 'cuda:1')
         exit(1)
-
-    elif args.dataset == 'hdblp':
-        if args.hetero_r == 1:
-            run_dblp('base', args.hetero_r, 'hdatasets/DBLP', args.nevals, args.hgnn)
-        elif args.start_coarsen_method == 'cugc' or args.start_coarsen_method == 'caugc':
-            run_dblp(args.start_coarsen_method, args.hetero_r, 'hdatasets/DBLP', args.nevals, args.hgnn)
-        elif args.start_coarsen_method in ['variation_neighborhoods', 'variation_edges', 'variation_cliques', 'heavy_edge', 'algebraic_JC', 'affinity_GS', 'kron', 'fugc', 'faugc']:
-            run_dblp(args.start_coarsen_method, args.hetero_r, 'hdatasets/DBLP', args.nevals, args.hgnn)
-        
-        exit(1)
-
-    elif args.dataset == 'acm':
-        if args.hetero_r == 1:
-            run_acm('base', args.hetero_r, 'hdatasets/ACM', args.nevals, args.hgnn)
-        elif args.start_coarsen_method == 'cugc' or args.start_coarsen_method == 'caugc' or args.start_coarsen_method == 'cvan':
-            run_acm(args.start_coarsen_method, args.hetero_r, 'hdatasets/ACM', args.nevals, args.hgnn)
-        elif args.start_coarsen_method in ['variation_neighborhoods', 'variation_edges', 'variation_cliques', 'heavy_edge', 'algebraic_JC', 'affinity_GS', 'kron', 'fugc', 'faugc']:
-            run_acm(args.start_coarsen_method, args.hetero_r, 'hdatasets/ACM', args.nevals, args.hgnn)
-        exit(1)
-        
+    
         
     else:
         print("are you sure about the dataset name ??")
