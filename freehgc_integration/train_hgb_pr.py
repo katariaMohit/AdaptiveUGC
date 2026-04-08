@@ -5,8 +5,6 @@ import torch.nn as nn
 import numpy as np
 import logging
 import uuid
-from model_hgb import *
-from model_SeHGNN import *
 import sys
 from data_hgb import *
 from utils_hgb import *

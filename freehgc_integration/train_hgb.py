@@ -1055,6 +1055,8 @@ def main(args):
         print(f'Best Epoch {best_epoch} at {checkpt_file.split("/")[-1]}\n\t with val loss {best_val_loss:.4f} and test loss {best_test_loss:.4f}')
         logging.info("macro: Best Val {:.4f}, Best Test {:.4f}".format(best_val_macro, best_test_macro))
         logging.info("micro: Best Val {:.4f}, Best Test {:.4f}".format(best_val_micro, best_test_micro))
+    
+    return best_test_micro, best_val_micro, time_sum
 
 if __name__ == "__main__":
 
@@ -1130,21 +1132,44 @@ if __name__ == "__main__":
     # print(args)
     # main(args)
 
-    datasets = ['IMDB']
+    datasets = ['IMDB', 'DBLP', 'ACM']
     models = ['HeteroSGC', 'HeteroGCN', 'HeteroGCN2']
     
-    for dataset in datasets:
-        for model in models:
-            
-            args.dataset = dataset
-            args.model = model
-            args.lr = 0.3   # your choice
-            args.method = 'FreeHGC'
-            
-            print(f"\n==== RUN: {dataset} | {model} ====\n")
-            
-            start = time.time()
-            main(args)
-            end = time.time()
-            
-            print(f"TOTAL TIME: {end-start:.2f}s")
+    import csv
+    csv_file = "results.csv"
+
+    write_header = not os.path.exists(csv_file)
+
+    with open(csv_file, mode="a", newline="") as file:
+        writer = csv.writer(file)
+
+        if write_header:
+            writer.writerow(["dataset", "model", "accuracy", "r", "total_time"])
+
+        for dataset in datasets:
+            for model in models:
+
+                args.dataset = dataset
+                args.model = model
+                args.lr = 0.3
+                args.method = 'FreeHGC'
+
+                print(f"\n==== RUN: {dataset} | {model} ====\n")
+
+                start = time.time()
+                test_acc, val_acc, train_time = main(args)
+                end = time.time()
+
+                total_time = end - start
+
+                writer.writerow([
+                    dataset,
+                    model,
+                    test_acc,
+                    args.reduction_rate,
+                    total_time
+                ])
+
+                file.flush()
+
+                print(f"TOTAL TIME: {total_time:.2f}s | Test Acc: {test_acc:.4f}")
